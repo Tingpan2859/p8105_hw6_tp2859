@@ -102,6 +102,7 @@ ggplot(city_models, aes(x = reorder(city_state, estimate), y = estimate)) +
   theme_minimal()
 
 ```
+The plot provides an insightful visual representation of gender-related differences in homicide resolution across cities. While most cities show no significant disparity (OR ≈ 1), a few cities—Albuquerque, NM; Stockton, CA; Fresno, CA; New York, NY; Baton Rouge, LA; and Cincinnati, OH—exhibit notable deviations, warranting further investigation into local factors affecting homicide resolution.
 
 #Problem3
 ```{r}
@@ -195,15 +196,6 @@ cv_results <- crossv_mc(birthweight, 100) %>%
 ```
 
 ```{r}
-cv_summary <- cv_results %>%
-  summarize(
-    mean_rmse_proposed = mean(rmse_proposed),
-    mean_rmse_model1 = mean(rmse_model1),
-    mean_rmse_model2 = mean(rmse_model2)
-  )
-
-print(cv_summary)
-
 # Step 6: Visualize RMSE Comparison
 cv_long <- cv_results %>%
   select(rmse_proposed, rmse_model1, rmse_model2) %>%
