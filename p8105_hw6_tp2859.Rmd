@@ -4,7 +4,94 @@ author: "Tingcheng Pan"
 date: "2024-12-02"
 output: html_document
 ---
+#Problem1
+```{r}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(modelr)
+library(broom)
+library(purrr)
 
+set.seed(123)
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+# Step 1: Fit the initial regression model
+initial_model <- lm(tmax ~ tmin, data = weather_df)
+
+# Step 2: Bootstrap sampling (5000 samples)
+bootstrap_results <- weather_df %>%
+  modelr::bootstrap(n = 5000) %>%
+  mutate(
+    model = map(strap, ~ lm(tmax ~ tmin, data = .x)),
+    glance = map(model, broom::glance),
+    tidy = map(model, broom::tidy),
+    r_squared = map_dbl(glance, "r.squared"),
+    beta0_beta1_log = map_dbl(tidy, ~ {
+      beta0 <- .x %>% filter(term == "(Intercept)") %>% pull(estimate)
+      beta1 <- .x %>% filter(term == "tmin") %>% pull(estimate)
+      if (!is.na(beta0) && !is.na(beta1)) {
+        return(log(beta0 * beta1))
+      } else {
+        return(NA)  # Handle cases where beta0 or beta1 is missing
+      }
+    })
+  )
+
+# Step 3: Handle NaN and missing values
+# Check for NA or NaN values
+num_na_r_squared <- sum(is.na(bootstrap_results$r_squared))
+num_na_beta0_beta1_log <- sum(is.na(bootstrap_results$beta0_beta1_log))
+
+print(paste("Number of NA in r_squared:", num_na_r_squared))
+print(paste("Number of NA in beta0_beta1_log:", num_na_beta0_beta1_log))
+
+# Exclude NaN values when calculating quantiles
+r_squared_ci <- quantile(bootstrap_results$r_squared, c(0.025, 0.975), na.rm = TRUE)
+beta0_beta1_log_ci <- quantile(bootstrap_results$beta0_beta1_log, c(0.025, 0.975), na.rm = TRUE)
+
+# Print confidence intervals
+print("95% CI for r^2:")
+print(r_squared_ci)
+print("95% CI for log(beta0 * beta1):")
+print(beta0_beta1_log_ci)
+
+# Step 4: Visualize the bootstrap distributions
+bootstrap_estimates <- bootstrap_results %>%
+  select(r_squared, beta0_beta1_log)
+
+# Plot for r_squared
+ggplot(bootstrap_estimates, aes(x = r_squared)) +
+  geom_histogram(bins = 30, fill = "blue", alpha = 0.6, color = "black") +
+  labs(
+    title = "Bootstrap Distribution of r^2",
+    x = "r^2",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
+# Plot for log(beta0 * beta1)
+ggplot(bootstrap_estimates, aes(x = beta0_beta1_log)) +
+  geom_histogram(bins = 30, fill = "green", alpha = 0.6, color = "black") +
+  labs(
+    title = "Bootstrap Distribution of log(beta0 * beta1)",
+    x = "log(beta0 * beta1)",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+
+#Problem2
 ```{r}
 # Load required libraries
 library(dplyr)
