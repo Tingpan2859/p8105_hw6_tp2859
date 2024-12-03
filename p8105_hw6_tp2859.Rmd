@@ -1,0 +1,223 @@
+---
+title: "p8105_hw6_tp2859"
+author: "Tingcheng Pan"
+date: "2024-12-02"
+output: html_document
+---
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(broom)
+library(purrr)
+library(tidyverse)
+library(dplyr)
+library(mgcv)
+library(modelr)
+library(SemiPar)
+
+# Load the dataset
+homicide_data <- read.csv("homicide-data.csv")
+# Step 1: Create city_state variable
+homicide_data <- homicide_data %>%
+  mutate(
+    city_state = paste(city, state, sep = ", "),
+    resolved = ifelse(disposition %in% c("Closed by arrest"), 1, 0),
+    victim_age = as.numeric(victim_age)
+  )
+```
+```{r}
+# Step 2: Clean the data
+homicide_data_clean <- homicide_data %>%
+  # Remove specified cities
+  filter(
+    !city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")
+  ) %>%
+  # Restrict to victim races "White" or "Black"
+  filter(
+    victim_race %in% c("White", "Black")
+  ) %>%
+  # Remove rows with missing victim_age and ensure it's numeric
+  filter(!is.na(victim_age),
+         !is.na(lat),
+         !is.na(lon)) %>%
+  mutate(
+    victim_age = as.numeric(victim_age)
+  )
+```
+
+```{r}
+# Step 3: Logistic regression for Baltimore, MD
+baltimore_data <- filter(homicide_data_clean, city_state == "Baltimore, MD")
+
+# Fit logistic regression model
+baltimore_model <- glm(
+  resolved ~ victim_age + victim_sex + victim_race,
+  data = baltimore_data,
+  family = "binomial"
+)
+
+# Extract adjusted odds ratios and confidence intervals
+baltimore_results <-broom::tidy(baltimore_model, exponentiate = TRUE, conf.int = TRUE)
+
+baltimore_results %>%
+  filter(term == "victim_sexMale") %>%
+  select(estimate, conf.low, conf.high)
+```
+
+```{r}
+# Step 4: Logistic regression for all cities
+city_models <- homicide_data_clean %>%
+  group_by(city_state) %>%
+  nest() %>%
+  mutate(
+    model = map(data, ~ glm(
+      resolved ~ victim_age + victim_sex + victim_race,
+      family = binomial,
+      data = .x
+    )),
+    results = map(model, ~ broom::tidy(
+      .x,
+      exponentiate = TRUE,
+      conf.int = TRUE
+    ))
+  ) %>%
+  unnest(results) %>%
+  filter(term == "victim_sexMale") # Focus on male vs female comparison
+city_models
+```
+```{r}
+# Step 5: Create a plot of the Odds Ratios
+ggplot(city_models, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point(color = "blue") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.4, color = "blue") +
+  coord_flip() +
+  labs(
+    title = "Odds Ratios for Solving Homicides (Male vs Female Victims)",
+    x = "City",
+    y = "Odds Ratio (Male vs Female Victims)"
+  ) +
+  theme_minimal()
+
+```
+
+#Problem3
+```{r}
+# Load the dataset
+birthweight <- read.csv("birthweight.csv")
+
+# Step 1: Data Cleaning and Preparation
+# Update data cleaning with the correct number of labels
+birthweight <- birthweight %>%
+  mutate(
+    babysex = factor(babysex, labels = c("Male", "Female")),
+    malform = factor(malform, labels = c("Absent", "Present")),
+    frace = case_when(
+      frace == 1 ~ "White",
+      frace == 2 ~ "Black",
+      frace == 3 ~ "Asian",
+      frace == 4 ~ "Puerto Rican",
+      frace == 8 ~ "Other",
+      frace == 9 ~ "Unknown",
+      TRUE ~ "Invalid" # For unexpected values
+    ) %>% factor(),
+    mrace = case_when(
+      mrace == 1 ~ "White",
+      mrace == 2 ~ "Black",
+      mrace == 3 ~ "Asian",
+      mrace == 4 ~ "Puerto Rican",
+      mrace == 8 ~ "Other",
+      mrace == 9 ~ "Unknown",
+      TRUE ~ "Invalid" # For unexpected values
+    ) %>% factor(),
+    parity = as.factor(parity)
+  )%>%
+  drop_na()
+```
+The model I proposed is using following data:
+Gestational Age (gaweeks): Longer gestational age is strongly associated with higher birthweight.
+Mother's Weight Gain (wtgain): Increased weight gain during pregnancy is linked to better fetal growth.
+Mother's Pre-pregnancy BMI (ppbmi): Maternal nutritional status can significantly impact fetal growth.
+Mother's Race (mrace): Maternal race/ethnicity often reflects socioeconomic and health disparities affecting birthweight.
+Presence of Malformations (malform): Structural malformations may reduce birthweight.
+Mother's Height (mheight): Taller mothers tend to have larger infants due to their larger body frames.
+```{r}
+# Step 2: Propose a Primary Model
+# Include predictors: mother's weight gain, gestational age, and mother's height
+set.seed(123)
+proposed_model <- lm(
+  bwt ~ gaweeks + wtgain + ppbmi + mrace + malform + mheight,
+  data = birthweight
+)
+model1 <- lm(bwt ~ blength + gaweeks, data = birthweight)
+
+# Model 2: Head circumference, length, sex, and all interactions
+model2 <- lm(bwt ~ bhead * blength * babysex, data = birthweight)
+
+```
+
+```{r}
+# Step 3: Evaluate Models with Residual Plots
+birthweight <- birthweight %>%
+  add_predictions(proposed_model, var = "pred_proposed") %>%
+  add_residuals(proposed_model, var = "resid_proposed") %>%
+  add_predictions(model1, var = "pred_model1") %>%
+  add_residuals(model1, var = "resid_model1") %>%
+  add_predictions(model2, var = "pred_model2") %>%
+  add_residuals(model2, var = "resid_model2")
+
+ggplot(birthweight, aes(x = pred_proposed, y = resid_proposed)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Residuals vs. Fitted Values (Proposed Model)",
+    x = "Fitted Values",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+set.seed(123)
+cv_results <- crossv_mc(birthweight, 100) %>%
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble),
+    proposed_model = map(train, ~ lm(bwt ~ gaweeks + wtgain + ppbmi + mrace + malform + mheight, data = .)),
+    model1 = map(train, ~ lm(bwt ~ blength + gaweeks, data = .)),
+    model2 = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = .)),
+    rmse_proposed = map2_dbl(proposed_model, test, ~ rmse(.x, .y)),
+    rmse_model1 = map2_dbl(model1, test, ~ rmse(.x, .y)),
+    rmse_model2 = map2_dbl(model2, test, ~ rmse(.x, .y))
+  )
+```
+
+```{r}
+cv_summary <- cv_results %>%
+  summarize(
+    mean_rmse_proposed = mean(rmse_proposed),
+    mean_rmse_model1 = mean(rmse_model1),
+    mean_rmse_model2 = mean(rmse_model2)
+  )
+
+print(cv_summary)
+
+# Step 6: Visualize RMSE Comparison
+cv_long <- cv_results %>%
+  select(rmse_proposed, rmse_model1, rmse_model2) %>%
+  pivot_longer(cols = everything(), names_to = "Model", values_to = "RMSE")
+
+ggplot(cv_long, aes(x = Model, y = RMSE, fill = Model)) +
+  geom_boxplot() +
+  labs(
+    title = "Cross-Validated RMSE Comparison",
+    x = "Model",
+    y = "RMSE"
+  ) +
+  theme_minimal()
+```
+
+x
+
